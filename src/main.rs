@@ -22,6 +22,9 @@ struct Args {
     /// Translate automatically using OppenAI API.
     #[arg(long, default_value_t = false)]
     auto: bool,
+    /// Translate draft pages.
+    #[arg(long, default_value_t = false)]
+    drafts: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -159,14 +162,12 @@ impl FileMetadata {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-    let translator = translator::auto_detect(&args)?;
-
-    // println!("Looking into {}…", args.root.display());
-
+fn hugo(cmd_args: &Args, hugo_args: Vec<&str>) -> Result<String, Box<Error>> {
     let output = Command::new("hugo")
-        .args(&["config", "-s", &args.root.display().to_string(), "--format", "yaml"])
+        .args(vec![
+            vec!["-s", &cmd_args.root.display().to_string()],
+            hugo_args,
+        ].concat())
         .output()
         .map_err(Error::CommandInvocationFailed)?;
 
@@ -179,12 +180,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     // println!("Command executed successfully:\n{}", stdout);
 
-    let hugo_config_dto: HugoConfigDTO = serde_yaml::from_str(&stdout)
-        .map_err(Error::Yaml)?;
-    // println!("Found config: {:?}", hugo_config_dto);
+    Ok(stdout.to_string())
+}
 
-    let hugo_config = HugoConfig::new(hugo_config_dto, args.root.clone());
-    // println!("Derived config: {:?}", hugo_config);
+fn draft_files(cmd_args: &Args) -> Result<Vec<PathBuf>, Box<Error>> {
+    // List draft pages using `hugo list drafts` so [front matter cascade](https://gohugo.io/content-management/front-matter/#front-matter-cascade)
+    // is correctly handled.
+    // Output is in CSV format.
+    let stdout = hugo(cmd_args, vec!["list", "drafts"])?;
+    let site_root = &cmd_args.root;
+    let draft_files = stdout.lines()
+        // Skip CSV header row (`path,slug,title,date,expiryDate,publishDate,draft,permalink`)
+        .skip(1)
+        // Get first element (`path`) for each CSV line
+        // NOTE: File paths must not contain commas (`,`)
+        // NOTE: Unwrapping here is safe as the CSV line will always contains at least one comma (`,`)
+        .map(|l| l.split_once(",").unwrap().0)
+        // Map string path relative to site root to `PathBuf` relative to current working directory
+        .map(|p| site_root.join(p))
+        .collect();
+
+    Ok(draft_files)
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cmd_args = Args::parse();
+    let translator = translator::auto_detect(&cmd_args)?;
+
+    let hugo_config = {
+        let stdout = hugo(&cmd_args, vec!["config", "--format", "yaml"])?;
+
+        let hugo_config_dto: HugoConfigDTO = serde_yaml::from_str(&stdout)
+            .map_err(Error::Yaml)?;
+        // println!("Found config: {:?}", hugo_config_dto);
+    
+        let hugo_config = HugoConfig::new(hugo_config_dto, cmd_args.root.clone());
+        // println!("Derived config: {:?}", hugo_config);
+
+        hugo_config
+    };
 
     if hugo_config.language_configs.len() < 2 {
         return Err(Box::new(Error::NoTranslationPossible))
@@ -192,6 +226,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut files_metadata: Vec<Box<FileMetadata>> = Vec::new();
     let mut all_translations: HashMap<String, HashMap<String, Box<FileMetadata>>> = HashMap::new();
+    let draft_files = if cmd_args.drafts { vec![] } else { draft_files(&cmd_args)? };
     for (language_identifier, language_config) in hugo_config.language_configs.iter() {
         // println!("Finding files in '{}'…", language_config.language_name);
         let files = find_markdown_files(&language_config.content_dir);
@@ -201,6 +236,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             // Mapping to `FileMetadata` has the side effect of filtering out files which do not contain a `translationKey` in their front matter.
             .flat_map(|path| FileMetadata::try_from(path.to_owned(), language_identifier.clone()))
+            .filter(|p| {
+                if draft_files.contains(&p.path) {
+                    println!("Skipping draft page <{}>…", &p.path.display());
+                    false
+                } else {
+                    true
+                }
+            })
             .map(Box::new)
             .collect::<Vec<_>>();
 
