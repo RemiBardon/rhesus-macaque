@@ -291,6 +291,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let translation = translator.translate_content(&original_content, &from_lang, &to_lang, "hash".to_string())?;
 
             println!("Saving '{}' translation of <{}> in <{}>…", to_lang, content_file_path.display(), translated_file_path.display());
+            fs::create_dir_all(translated_file_path.parent().unwrap())?;
             fs::write(translated_file_path, translation)?;
         }
     }
