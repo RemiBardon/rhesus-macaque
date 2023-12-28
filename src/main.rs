@@ -115,9 +115,8 @@ impl FileMetadata {
         let base_name = path.file_stem().ok_or(Error::FileHasNoName)?.to_string_lossy().to_string();
 
         let front_matter = {
-            let Ok(file_content) = fs::read_to_string(&path) else {
-                return Err(Error::CouldNotReadFile(path.clone()))
-            };
+            let file_content = fs::read_to_string(&path)
+                .map_err(|err| Error::CouldNotReadFile(path.clone(), err))?;
 
             // Split the file content by lines
             let lines: Vec<&str> = file_content.split('\n').collect();
@@ -271,11 +270,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .get(&from_lang)
             .expect("TODO");
 
+        let original_content = fs::read_to_string(&metadata.path)
+            .map_err(|err| Error::CouldNotReadFile(metadata.path.clone(), err))?;
+
+        let content_file_path = metadata.path
+            .strip_prefix(from_language_config.content_dir.clone())
+                .expect(&format!("{}", from_language_config.content_dir.display()))
+            .to_path_buf();
+
         for to_lang in to_translate {
-            let content_file_path = metadata.path
-                .strip_prefix(from_language_config.content_dir.clone())
-                    .expect(&format!("{}", from_language_config.content_dir.display()))
-                .to_path_buf();
             println!("Translating <{}> from '{}' to '{}'…", content_file_path.display(), from_lang, to_lang);
 
             let to_language_config = hugo_config.language_configs
@@ -285,7 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let translated_file_path = translator.translate_path(&content_file_path, &from_lang, &to_lang)?;
             let translated_file_path = to_language_config.content_dir.join(translated_file_path);
 
-            let translation = translator.translate_content("text".to_string(), &from_lang, &to_lang, "hash".to_string())?;
+            let translation = translator.translate_content(&original_content, &from_lang, &to_lang, "hash".to_string())?;
 
             println!("Saving '{}' translation of <{}> in <{}>…", to_lang, content_file_path.display(), translated_file_path.display());
             fs::write(translated_file_path, translation)?;
@@ -303,7 +306,7 @@ enum Error {
     Yaml(serde_yaml::Error),
     NoTranslationPossible,
     FileHasNoName,
-    CouldNotReadFile(PathBuf),
+    CouldNotReadFile(PathBuf, std::io::Error),
     NoFrontMatterFound(PathBuf),
     FrontMatterParsingFailed(serde_yaml::Error),
 }
@@ -319,6 +322,7 @@ impl std::error::Error for Error {
         match self {
             Error::CommandInvocationFailed(err) => Some(err),
             Error::Yaml(err) => Some(err),
+            Error::CouldNotReadFile(_, err) => Some(err),
             Error::FrontMatterParsingFailed(err) => Some(err),
             _ => None,
         }
