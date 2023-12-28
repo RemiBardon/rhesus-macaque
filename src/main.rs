@@ -1,16 +1,12 @@
 mod translator;
 
 use clap::Parser;
-use clipboard::ClipboardProvider;
-use clipboard::ClipboardContext;
 use indexmap::IndexMap;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io;
 use std::path::PathBuf;
 use std::process::Command;
-use std::str::FromStr;
 use walkdir::WalkDir;
 
 /// TODO
@@ -18,11 +14,14 @@ use walkdir::WalkDir;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the root of the website.
-    #[arg(short, long)]
+    #[arg(long)]
     root: PathBuf,
     /// Do not translate.
     #[arg(long, default_value_t = false)]
     dry_run: bool,
+    /// Translate automatically using OppenAI API.
+    #[arg(long, default_value_t = false)]
+    auto: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -160,18 +159,9 @@ impl FileMetadata {
     }
 }
 
-fn wait_for_user_input() {
-    let mut user_input = String::new();
-    match io::stdin().read_line(&mut user_input) {
-        Ok(_) => (),
-        Err(error) => {
-            eprintln!("Error reading input: {}", error);
-        },
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let translator = translator::auto_detect(&args)?;
 
     // println!("Looking into {}…", args.root.display());
 
@@ -202,7 +192,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut files_metadata: Vec<Box<FileMetadata>> = Vec::new();
     let mut all_translations: HashMap<String, HashMap<String, Box<FileMetadata>>> = HashMap::new();
-    let mut clipboard: ClipboardContext = ClipboardProvider::new().unwrap();
     for (language_identifier, language_config) in hugo_config.language_configs.iter() {
         // println!("Finding files in '{}'…", language_config.language_name);
         let files = find_markdown_files(&language_config.content_dir);
@@ -230,55 +219,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for metadata in files_metadata {
         let translation_key = metadata.translation_key;
         let translations = all_translations.get(&translation_key).cloned().unwrap_or_default();
-        let from_language_identifier = metadata.language_identifier;
+        let from_lang = metadata.language_identifier;
 
         let already_translated_languages: HashSet<_> = translations.keys().collect();
         let to_translate: HashSet<_> = all_languages.difference(&already_translated_languages).collect();
 
         let from_language_config = hugo_config.language_configs
-            .get(&from_language_identifier)
+            .get(&from_lang)
             .expect("TODO");
 
-        for to_language_identifier in to_translate {
+        for to_lang in to_translate {
             let content_file_path = metadata.path
-                // .strip_prefix(args.root.clone()).expect("File path should be prefixed by root to project")
-                .strip_prefix(from_language_config.content_dir.clone()).expect(&format!("{}", from_language_config.content_dir.display()));
+                .strip_prefix(from_language_config.content_dir.clone())
+                    .expect(&format!("{}", from_language_config.content_dir.display()))
+                .to_path_buf();
+            println!("Translating <{}> from '{}' to '{}'…", content_file_path.display(), from_lang, to_lang);
 
             let to_language_config = hugo_config.language_configs
-                .get(to_language_identifier.to_owned())
+                .get(to_lang.to_owned())
                 .expect("TODO");
 
-            let mut prompt = format!(r#"Translate "{}" in {}"#, content_file_path.display(), to_language_identifier);
-            if args.dry_run {
-                println!("Translating <{}> from '{}' to '{}' (file path translated by ChatGPT when `dry-run` disabled)…", content_file_path.display(), from_language_identifier, to_language_identifier);
-            } else {
-                println!("Paste the following prompt into ChatGPT (it's already in your clipboard), copy the result, come back and hit [Enter]:\n> {}", prompt);
-                clipboard.set_contents(prompt).expect("TODO");
-                wait_for_user_input();
-                let clipboard_contents = clipboard.get_contents().expect("TODO");
-                let translated_file_path = to_language_config.content_dir
-                    .join(PathBuf::from_str(&clipboard_contents).expect("TODO"));
-                println!("Translating <{}> from '{}' to '{}' in <{}>…", content_file_path.display(), from_language_identifier, to_language_identifier, translated_file_path.display());
-            }
+            let translated_file_path = translator.translate_path(&content_file_path, &from_lang, &to_lang)?;
+            let translated_file_path = to_language_config.content_dir.join(translated_file_path);
 
-            prompt = format!(
-                "Translate the following Hugo SSG markdown content file from {} to {}. Do not translate YAML items in `read_allowed` and `translationKey`. Add YAML front matter keys `translator: \"GPT-3.5\"` and `sourceHash: \"{}\"` before all other keys and `# GENERATED BY GPT-3.5` at the very top of the front matter. Remove italics from words in {} and add italics to words in {}.\n\n```md\n{}\n```",
-                from_language_identifier,
-                to_language_identifier,
-                "xxxx",
-                to_language_identifier,
-                from_language_identifier,
-                "Test",
-            );
-            if !args.dry_run {
-                println!("Paste the following prompt into ChatGPT (it's already in your clipboard), copy the result, come back and hit [Enter]:\n> {}", prompt);
-                clipboard.set_contents(prompt).expect("TODO");
-                wait_for_user_input();
-                let clipboard_contents = clipboard.get_contents().expect("TODO");
-                let translated_file_path = to_language_config.content_dir
-                    .join(PathBuf::from_str(&clipboard_contents).expect("TODO"));
-                println!("Pasting clipboard in <{}>…", translated_file_path.display());
-            }
+            let translation = translator.translate_content("text".to_string(), &from_lang, &to_lang, "hash".to_string())?;
+
+            println!("Saving '{}' translation of <{}> in <{}>…", to_lang, content_file_path.display(), translated_file_path.display());
+            fs::write(translated_file_path, translation)?;
         }
     }
 

@@ -18,7 +18,12 @@ clap = { version = "4.4.11", features = ["derive"] }
 clipboard = "0.5.0"
 dotenvy = "0.15.7"
 indexmap = "2.1.0"
-openai-api-rs = "2.1.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9.29"
 walkdir = "2.4.0"
+
+[dependencies.openai-api-rs]
+git = "https://github.com/dongri/openai-api-rs"
+# Pin `openai-api-rs` to a specific commit hash as it uses a private API key
+# and a malicious commit could export it.
+rev = "f88cc6b42ea592acb44346ff6bff9a966eff1234"
