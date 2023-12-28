@@ -1,3 +1,6 @@
+mod translator;
+
+use clap::Parser;
 use clipboard::ClipboardProvider;
 use clipboard::ClipboardContext;
 use indexmap::IndexMap;
@@ -9,8 +12,6 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
 use walkdir::WalkDir;
-
-use clap::Parser;
 
 /// TODO
 #[derive(Parser, Debug)]
@@ -169,7 +170,7 @@ fn wait_for_user_input() {
     }
 }
 
-fn main() -> Result<(), Error> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // println!("Looking into {}…", args.root.display());
@@ -182,7 +183,7 @@ fn main() -> Result<(), Error> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         eprintln!("Command failed with error:\n{}", stderr);
-        return Err(Error::HugoCommandFailed(stderr.to_string()))
+        return Err(Box::new(Error::HugoCommandFailed(stderr.to_string())))
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -196,7 +197,7 @@ fn main() -> Result<(), Error> {
     // println!("Derived config: {:?}", hugo_config);
 
     if hugo_config.language_configs.len() < 2 {
-        return Err(Error::NoTranslationPossible)
+        return Err(Box::new(Error::NoTranslationPossible))
     }
 
     let mut files_metadata: Vec<Box<FileMetadata>> = Vec::new();
@@ -295,6 +296,23 @@ enum Error {
     CouldNotReadFile(PathBuf),
     NoFrontMatterFound(PathBuf),
     FrontMatterParsingFailed(serde_yaml::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error: {:?}", self)
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::CommandInvocationFailed(err) => Some(err),
+            Error::Yaml(err) => Some(err),
+            Error::FrontMatterParsingFailed(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 fn find_markdown_files(directory: &PathBuf) -> Vec<PathBuf> {
