@@ -6,7 +6,6 @@ publish = false
 description = "A tool which translates Hugo content pages"
 readme = "README.md"
 license = "WTFPL"
-license-file = "LICENSE"
 authors = ["Rémi Bardon <remi@remibardon.name>"]
 repository = "https://github.com/RemiBardon/rhesus-macaque"
 keywords = ["hugo", "translation", "openai", "gpt", "chatgpt", "i18n", "internationalization", "l10n", "localization"]
