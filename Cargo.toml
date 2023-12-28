@@ -1,0 +1,23 @@
+[package]
+name = "rhesus-macaque"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "A tool which translates Hugo content pages"
+readme = "README.md"
+license = "WTFPL"
+license-file = "LICENSE"
+authors = ["Rémi Bardon <remi@remibardon.name>"]
+repository = "https://github.com/RemiBardon/rhesus-macaque"
+keywords = ["hugo", "translation", "openai", "gpt", "chatgpt", "i18n", "internationalization", "l10n", "localization"]
+categories = ["internationalization"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.4.11", features = ["derive"] }
+clipboard = "0.5.0"
+indexmap = "2.1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9.29"
+walkdir = "2.4.0"
