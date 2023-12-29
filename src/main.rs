@@ -231,28 +231,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let files = find_markdown_files(&language_config.content_dir);
         // println!("Files found:\n{:?}", files);
 
-        let metadatas = files
+        let translatable_files = files
             .iter()
             // Mapping to `FileMetadata` has the side effect of filtering out files which do not contain a `translationKey` in their front matter.
             .flat_map(|path| FileMetadata::try_from(path.to_owned(), language_identifier.clone()))
-            .filter(|p| {
-                if draft_files.contains(&p.path) {
-                    println!("Skipping draft page <{}>…", &p.path.display());
-                    false
-                } else {
-                    true
-                }
-            })
             .map(Box::new)
             .collect::<Vec<_>>();
 
-        for metadata in metadatas.iter() {
+        for metadata in translatable_files.iter() {
             all_translations
                 .entry(metadata.clone().translation_key)
                 .or_insert(HashMap::new())
                 .insert(metadata.clone().language_identifier, metadata.to_owned());
         }
-        files_metadata.extend(metadatas);
+
+        let translatable_files = translatable_files.into_iter().filter(|p| {
+            if draft_files.contains(&p.path) {
+                println!("Skipping draft page <{}>…", &p.path.display());
+                false
+            } else {
+                true
+            }
+        }).collect::<Vec<_>>();
+        files_metadata.extend(translatable_files);
     }
     // println!("Derived metadata: {:?}", files_metadata);
     // println!("All translations: {:?}", all_translations);
